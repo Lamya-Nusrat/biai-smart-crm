@@ -231,13 +231,7 @@ records = get_all_enquiries()
 if page == "Dashboard":
 
     st.title("Dashboard")
-
-    st.caption(
-        "Your enquiry overview, based on saved records"
-    )
-
     total = len(records)
-
     new_count = sum(
         enquiry["status"] == "New"
         for enquiry in records
@@ -818,11 +812,6 @@ elif page == "Enquiries":
 elif page == "Enquiry Tracker":
 
     st.title("Enquiry Tracker")
-
-    st.caption(
-        "Track saved enquiries across five statuses."
-    )
-
     columns = st.columns(5)
 
     for column, status in zip(columns, STATUSES):
