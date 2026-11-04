@@ -254,6 +254,7 @@ def category_options(defaults, records, field, current):
     values = list(defaults)
 
     for record in records:
+
         value = str(
             record.get(field) or ""
         ).strip()
@@ -374,6 +375,17 @@ def reset_extraction_fields():
         st.session_state.pop(field, None)
 
 
+def is_gemini_quota_error(error):
+    """Identify Gemini quota errors without exposing API details."""
+    code = getattr(error, "code", None)
+    message = str(error).lower()
+    return (
+        code == 429
+        or "resource_exhausted" in message
+        or "429" in message
+    )
+
+
 # Load database records
 records = get_all_enquiries()
 
@@ -442,18 +454,10 @@ elif page == "AI Enquiry Assistant":
 
     st.title("AI Enquiry Assistant")
 
-    # Gemini Free Tier information
-    st.warning(
-        "Gemini Free Tier has daily request limits. "
-        "AI features may be temporarily unavailable "
-        "when the quota is reached. Please try again "
-        "after the limit resets."
-    )
-
     if st.session_state.pop("saved_notice", False):
 
         st.success(
-            "Enquiry saved successfully!"
+            "Enquiry saved successfully! "
         )
 
     message = st.text_area(
@@ -508,23 +512,37 @@ elif page == "AI Enquiry Assistant":
 
                     st.session_state.suggested_reply = reply
 
-                except Exception:
+                except Exception as error:
 
                     logging.exception(
                         "Reply generation failed"
                     )
 
-                    st.session_state.reply_error = True
+                    st.session_state.reply_error = (
+                        "quota" if is_gemini_quota_error(error)
+                        else "general"
+                    )
 
-            except Exception:
+            except Exception as error:
 
                 logging.exception(
                     "Enquiry extraction failed"
                 )
 
-                st.session_state.extraction_error = True
+                st.session_state.extraction_error = (
+                    "quota" if is_gemini_quota_error(error)
+                    else "general"
+                )
 
-    if st.session_state.extraction_error:
+    if st.session_state.extraction_error == "quota":
+
+        st.warning(
+            "Gemini Free Tier request limit reached. "
+            "AI extraction is temporarily unavailable. "
+            "Please try again after the quota resets."
+        )
+
+    elif st.session_state.extraction_error:
 
         st.error(
             "Unable to extract enquiry information "
@@ -542,7 +560,16 @@ elif page == "AI Enquiry Assistant":
             "Information extracted successfully!"
         )
 
-        if st.session_state.reply_error:
+        if st.session_state.reply_error == "quota":
+
+            st.warning(
+                "Gemini Free Tier request limit reached. "
+                "A suggested reply is temporarily unavailable. "
+                "You can write one manually below or try "
+                "again after the quota resets."
+            )
+
+        elif st.session_state.reply_error:
 
             st.warning(
                 "A suggested reply could not be generated. "
