@@ -692,12 +692,6 @@ elif page == "AI Enquiry Assistant":
         and message != st.session_state.processed_message
     ):
 
-        st.caption(
-            "Message changed. Click Extract Information "
-            "with AI to process the new enquiry."
-        )
-
-
 # ========================================
 # SAVED ENQUIRIES
 # ========================================
