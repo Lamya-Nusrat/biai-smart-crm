@@ -107,11 +107,12 @@ st.markdown("""
     display: none !important;
 }
 
-/* Consistent empty-state message */
+/* Empty-state message */
 
 .empty-state {
     background-color: #FFFFFF;
     border: 1px solid #DED7CC;
+    border-top: 5px solid #D45116;
     border-radius: 14px;
     padding: 20px 24px;
     color: #55504A;
