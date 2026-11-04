@@ -14,9 +14,8 @@ from google.genai.errors import ServerError
 # GEMINI MODELS
 # ----------------------------------------
 
-PRIMARY_MODEL = "gemini-3.5-flash"
-BACKUP_MODEL = "gemini-3.5-flash-lite"
-
+PRIMARY_MODEL = "gemini-3.5-flash-lite"
+BACKUP_MODEL = "gemini-3.8-flash"
 
 # ----------------------------------------
 # GEMINI REQUEST
