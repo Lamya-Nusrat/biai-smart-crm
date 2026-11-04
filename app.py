@@ -107,6 +107,18 @@ st.markdown("""
     display: none !important;
 }
 
+/* Consistent empty-state message */
+
+.empty-state {
+    background-color: #FFFFFF;
+    border: 1px solid #DED7CC;
+    border-radius: 14px;
+    padding: 20px 24px;
+    color: #55504A;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
 /* Tracker card information */
 
 .tracker-name {
@@ -231,7 +243,9 @@ records = get_all_enquiries()
 if page == "Dashboard":
 
     st.title("Dashboard")
+
     total = len(records)
+
     new_count = sum(
         enquiry["status"] == "New"
         for enquiry in records
@@ -477,7 +491,13 @@ elif page == "Enquiries":
     st.title("Saved Enquiries")
 
     if not records:
-        st.info("No enquiries saved yet.")
+
+        st.markdown(
+            '<div class="empty-state">'
+            'No enquiries saved yet.'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
     else:
         st.metric(
@@ -505,7 +525,13 @@ elif page == "Enquiries":
         )
 
         if not filtered_records:
-            st.info("No matching enquiries found.")
+
+            st.markdown(
+                '<div class="empty-state">'
+                'No matching enquiries found.'
+                '</div>',
+                unsafe_allow_html=True
+            )
 
         for enquiry in filtered_records:
 
@@ -812,6 +838,7 @@ elif page == "Enquiries":
 elif page == "Enquiry Tracker":
 
     st.title("Enquiry Tracker")
+
     columns = st.columns(5)
 
     for column, status in zip(columns, STATUSES):
