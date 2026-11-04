@@ -1,0 +1,9 @@
+.venv/
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+.env
+check_models.py
+test_gemini.py
