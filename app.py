@@ -1,18 +1,19 @@
 
-import streamlit as st
-import pandas as pd
+import logging
 import unicodedata
 from html import escape
 
-from ai_service import extract_enquiry, generate_reply
+import pandas as pd
+import streamlit as st
 
+from ai_service import extract_enquiry, generate_reply
 from database import (
     get_all_enquiries,
     save_enquiry,
     update_enquiry_status,
     update_enquiry,
     delete_enquiry,
-    matching_enquiries
+    matching_enquiries,
 )
 
 
@@ -49,6 +50,8 @@ STATUSES = [
     "Lost"
 ]
 
+OTHER_OPTION = "Other / Add New"
+
 
 # ----------------------------------------
 # CUSTOM STYLING
@@ -56,12 +59,13 @@ STATUSES = [
 
 st.markdown("""
 <style>
+
 .block-container {
     padding-top: 2rem;
     max-width: 1250px;
 }
 
-/* Dashboard metrics */
+/* Dashboard metric cards */
 
 [data-testid="stMetric"] {
     background: #FFFFFF !important;
@@ -81,7 +85,7 @@ st.markdown("""
     color: #161616 !important;
 }
 
-/* Saved enquiry expanders */
+/* Saved enquiry cards */
 
 [data-testid="stExpander"] {
     background: #FFFFFF;
@@ -95,13 +99,13 @@ st.markdown("""
     font-weight: 600;
 }
 
-/* Hide heading link icons */
+/* Hide heading links */
 
 [data-testid="stHeading"] a {
     visibility: hidden;
 }
 
-/* Hide unnecessary chart toolbar */
+/* Hide chart toolbar */
 
 [data-testid="stElementToolbar"] {
     display: none !important;
@@ -110,7 +114,7 @@ st.markdown("""
 /* Empty-state message */
 
 .empty-state {
-    background-color: #FFFFFF;
+    background: #FFFFFF;
     border: 1px solid #DED7CC;
     border-top: 5px solid #D45116;
     border-radius: 14px;
@@ -120,7 +124,7 @@ st.markdown("""
     line-height: 1.5;
 }
 
-/* Tracker card information */
+/* Tracker customer name */
 
 .tracker-name {
     color: #111111;
@@ -131,12 +135,15 @@ st.markdown("""
     overflow-wrap: anywhere;
 }
 
+/* Keep long text inside tracker cards */
+
 .tracker-detail {
     color: #55504A;
     font-size: 12px;
     line-height: 1.5;
     margin: 4px 0;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 </style>
@@ -168,11 +175,14 @@ page = st.sidebar.radio(
 # ----------------------------------------
 
 initial_state = {
+    "message_input": "",
     "extracted_data": None,
+    "processed_message": "",
     "suggested_reply": "",
-    "last_message": "",
-    "saved_enquiry_id": None,
-    "processed_message": ""
+    "reply_error": False,
+    "extraction_error": False,
+    "clear_after_save": False,
+    "saved_notice": False
 }
 
 for key, value in initial_state.items():
@@ -181,22 +191,24 @@ for key, value in initial_state.items():
 
 
 # ----------------------------------------
-# SEARCH FUNCTIONS
+# HELPER FUNCTIONS
 # ----------------------------------------
 
 def normalize_search_text(value):
-    """Normalize text for case-insensitive searches."""
+    """Normalize text for searching."""
 
     text = unicodedata.normalize(
         "NFKC",
         str(value or "")
     )
 
-    return " ".join(text.casefold().split())
+    return " ".join(
+        text.casefold().split()
+    )
 
 
 def matches_search(enquiry, query):
-    """Search all important enquiry fields."""
+    """Search saved enquiry information."""
 
     if not query.strip():
         return True
@@ -233,7 +245,137 @@ def matches_search(enquiry, query):
     )
 
 
-# Load saved enquiries
+def category_options(defaults, records, field, current):
+    """
+    Include known categories, existing database values,
+    and the value detected by AI.
+    """
+
+    values = list(defaults)
+
+    for record in records:
+
+        value = str(
+            record.get(field) or ""
+        ).strip()
+
+        if (
+            value
+            and value not in values
+            and value != OTHER_OPTION
+        ):
+            values.append(value)
+
+    current = str(current or "").strip()
+
+    if (
+        current
+        and current not in values
+        and current != OTHER_OPTION
+    ):
+        values.append(current)
+
+    values.append(OTHER_OPTION)
+
+    return values
+
+
+def choose_category(
+    label,
+    defaults,
+    records,
+    field,
+    current,
+    key_prefix
+):
+    """
+    Select an existing Source/Programme or enter
+    a new custom value.
+    """
+
+    options = category_options(
+        defaults,
+        records,
+        field,
+        current
+    )
+
+    selected = st.selectbox(
+        label,
+        options,
+        index=(
+            options.index(current)
+            if current in options
+            else 0
+        ),
+        key=f"{key_prefix}_choice"
+    )
+
+    if selected == OTHER_OPTION:
+
+        custom_value = st.text_input(
+            f"New {label}",
+            placeholder="Enter a custom value",
+            key=f"{key_prefix}_custom"
+        )
+
+        return custom_value.strip()
+
+    return selected
+
+
+def clear_processor():
+    """
+    Clear the previous enquiry after saving,
+    before the message widget is displayed.
+    """
+
+    st.session_state.message_input = ""
+    st.session_state.extracted_data = None
+    st.session_state.processed_message = ""
+    st.session_state.suggested_reply = ""
+
+    st.session_state.reply_error = False
+    st.session_state.extraction_error = False
+
+    fields_to_clear = [
+        "customer_name",
+        "customer_phone",
+        "customer_status",
+        "customer_language",
+        "reply_editor",
+        "new_source_choice",
+        "new_source_custom",
+        "new_programme_choice",
+        "new_programme_custom"
+    ]
+
+    for field in fields_to_clear:
+        st.session_state.pop(field, None)
+
+    st.session_state.clear_after_save = False
+
+
+def reset_extraction_fields():
+    """Clear previous AI form fields."""
+
+    fields = [
+        "customer_name",
+        "customer_phone",
+        "customer_status",
+        "customer_language",
+        "reply_editor",
+        "new_source_choice",
+        "new_source_custom",
+        "new_programme_choice",
+        "new_programme_custom"
+    ]
+
+    for field in fields:
+        st.session_state.pop(field, None)
+
+
+# Load database records
 records = get_all_enquiries()
 
 
@@ -245,39 +387,42 @@ if page == "Dashboard":
 
     st.title("Dashboard")
 
-    total = len(records)
-
-    new_count = sum(
-        enquiry["status"] == "New"
-        for enquiry in records
-    )
-
-    interested_count = sum(
-        enquiry["status"] == "Interested"
-        for enquiry in records
-    )
-
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Total Enquiries", total)
-    col2.metric("New", new_count)
-    col3.metric("Interested", interested_count)
+    col1.metric(
+        "Total Enquiries",
+        len(records)
+    )
+
+    col2.metric(
+        "New",
+        sum(
+            enquiry["status"] == "New"
+            for enquiry in records
+        )
+    )
+
+    col3.metric(
+        "Interested",
+        sum(
+            enquiry["status"] == "Interested"
+            for enquiry in records
+        )
+    )
 
     st.subheader("Pipeline Overview")
 
-    stage_counts = {
-        status: sum(
-            enquiry["status"] == status
-            for enquiry in records
-        )
-        for status in STATUSES
-    }
-
     chart_data = pd.DataFrame(
         {
-            "Enquiries": list(stage_counts.values())
+            "Enquiries": [
+                sum(
+                    enquiry["status"] == status
+                    for enquiry in records
+                )
+                for status in STATUSES
+            ]
         },
-        index=list(stage_counts.keys())
+        index=STATUSES
     )
 
     st.bar_chart(
@@ -292,13 +437,22 @@ if page == "Dashboard":
 
 elif page == "AI Enquiry Assistant":
 
+    # Clear previous enquiry after successful save
+    if st.session_state.clear_after_save:
+        clear_processor()
+
     st.title("AI Enquiry Assistant")
+
+    if st.session_state.pop("saved_notice", False):
+
+        st.success(
+            "Enquiry saved successfully! "
+            "You can paste a new enquiry."
+        )
 
     message = st.text_area(
         "Paste Customer Enquiry",
-        value=st.session_state.last_message,
         height=180,
-        placeholder="",
         key="message_input"
     )
 
@@ -308,36 +462,38 @@ elif page == "AI Enquiry Assistant":
     ):
 
         if not message.strip():
-            st.warning("Please paste an enquiry first.")
+
+            st.warning(
+                "Please paste an enquiry first."
+            )
 
         else:
-            fields_to_clear = [
-                "customer_name",
-                "customer_phone",
-                "customer_source",
-                "customer_programme",
-                "customer_status",
-                "customer_language",
-                "reply_editor"
-            ]
 
-            for field in fields_to_clear:
-                st.session_state.pop(field, None)
+            reset_extraction_fields()
 
             st.session_state.extracted_data = None
+            st.session_state.processed_message = ""
             st.session_state.suggested_reply = ""
-            st.session_state.saved_enquiry_id = None
-            st.session_state.last_message = message
+            st.session_state.reply_error = False
+            st.session_state.extraction_error = False
 
             try:
-                with st.spinner("Extracting information..."):
+
+                with st.spinner(
+                    "Extracting information..."
+                ):
+
                     result = extract_enquiry(message)
 
                 st.session_state.extracted_data = result
                 st.session_state.processed_message = message
 
                 try:
-                    with st.spinner("Generating suggested reply..."):
+
+                    with st.spinner(
+                        "Generating suggested reply..."
+                    ):
+
                         reply = generate_reply(
                             message,
                             result.get("language") or "English",
@@ -346,41 +502,71 @@ elif page == "AI Enquiry Assistant":
 
                     st.session_state.suggested_reply = reply
 
-                except Exception as error:
-                    st.warning(
-                        f"Reply generation unavailable: {error}"
+                except Exception:
+
+                    logging.exception(
+                        "Reply generation failed"
                     )
 
-            except Exception as error:
-                st.error(
-                    f"AI extraction failed: {error}"
+                    st.session_state.reply_error = True
+
+            except Exception:
+
+                logging.exception(
+                    "Enquiry extraction failed"
                 )
+
+                st.session_state.extraction_error = True
+
+    if st.session_state.extraction_error:
+
+        st.error(
+            "Unable to extract enquiry information "
+            "right now. Please try again."
+        )
 
     result = st.session_state.extracted_data
 
-    if result is not None:
+    if (
+        result is not None
+        and st.session_state.processed_message == message
+    ):
 
-        st.success("Information extracted successfully!")
+        st.success(
+            "Information extracted successfully!"
+        )
+
+        if st.session_state.reply_error:
+
+            st.warning(
+                "A suggested reply could not be generated. "
+                "You can write a reply manually below "
+                "or try extracting again."
+            )
 
         initial_fields = {
             "customer_name": result.get("name") or "",
             "customer_phone": result.get("phone") or "",
-            "customer_source": result.get("source") or "Unknown",
-            "customer_programme": result.get("programme") or "Unknown",
             "customer_status": "New",
-            "customer_language": result.get("language") or "English",
+            "customer_language": (
+                result.get("language") or "English"
+            ),
             "reply_editor": st.session_state.suggested_reply
         }
 
         for field, value in initial_fields.items():
+
             if field not in st.session_state:
                 st.session_state[field] = value
 
-        st.subheader("Extracted Customer Information")
+        st.subheader(
+            "Extracted Customer Information"
+        )
 
         col1, col2 = st.columns(2)
 
         with col1:
+
             st.text_input(
                 "Customer Name",
                 key="customer_name"
@@ -391,17 +577,28 @@ elif page == "AI Enquiry Assistant":
                 key="customer_phone"
             )
 
-            st.selectbox(
-                "Enquiry Source",
-                SOURCES,
-                key="customer_source"
+            selected_source = choose_category(
+                label="Enquiry Source",
+                defaults=SOURCES,
+                records=records,
+                field="source",
+                current=(
+                    result.get("source") or "Unknown"
+                ),
+                key_prefix="new_source"
             )
 
         with col2:
-            st.selectbox(
-                "Interested Programme",
-                PROGRAMMES,
-                key="customer_programme"
+
+            selected_programme = choose_category(
+                label="Interested Programme",
+                defaults=PROGRAMMES,
+                records=records,
+                field="programme",
+                current=(
+                    result.get("programme") or "Unknown"
+                ),
+                key_prefix="new_programme"
             )
 
             st.selectbox(
@@ -416,6 +613,7 @@ elif page == "AI Enquiry Assistant":
             )
 
         st.divider()
+
         st.subheader("AI Suggested Reply")
 
         st.caption(
@@ -429,58 +627,76 @@ elif page == "AI Enquiry Assistant":
         )
 
         st.divider()
+
         st.subheader("Save Enquiry")
 
-        # Check duplicate enquiries only before saving
-        if st.session_state.saved_enquiry_id is None:
+        duplicates = matching_enquiries(
+            st.session_state.customer_phone,
+            st.session_state.processed_message
+        )
 
-            duplicates = matching_enquiries(
-                st.session_state.customer_phone,
-                st.session_state.processed_message
+        if duplicates:
+
+            st.warning(
+                "This enquiry may already be saved. "
+                "You can still save it again if needed."
             )
 
-            if duplicates:
+        if st.button(
+            "Save Enquiry",
+            type="primary"
+        ):
 
-                ids = ", ".join(
-                    str(item["id"])
-                    for item in duplicates
-                )
-
-                st.warning(
-                    f"Possible duplicate enquiry. "
-                    f"Existing ID(s): {ids}"
-                )
-
-        if st.session_state.saved_enquiry_id is not None:
-
-            st.success("Enquiry saved successfully!")
-
-        else:
-
-            if st.button(
-                "Save Enquiry",
-                type="primary"
+            if (
+                not selected_source
+                or not selected_programme
             ):
 
+                st.warning(
+                    "Enter a source and programme, "
+                    "or choose Unknown."
+                )
+
+            else:
+
                 try:
-                    enquiry_id = save_enquiry(
+
+                    save_enquiry(
                         st.session_state.customer_name,
                         st.session_state.customer_phone,
-                        st.session_state.customer_source,
-                        st.session_state.customer_programme,
+                        selected_source,
+                        selected_programme,
                         st.session_state.customer_status,
                         st.session_state.customer_language,
                         st.session_state.processed_message,
                         st.session_state.reply_editor
                     )
 
-                    st.session_state.saved_enquiry_id = enquiry_id
+                    st.session_state.saved_notice = True
+                    st.session_state.clear_after_save = True
+
                     st.rerun()
 
-                except Exception as error:
-                    st.error(
-                        f"Could not save enquiry: {error}"
+                except Exception:
+
+                    logging.exception(
+                        "Saving enquiry failed"
                     )
+
+                    st.error(
+                        "Unable to save the enquiry. "
+                        "Please try again."
+                    )
+
+    elif (
+        result is not None
+        and message != st.session_state.processed_message
+    ):
+
+        st.caption(
+            "Message changed. Click Extract Information "
+            "with AI to process the new enquiry."
+        )
 
 
 # ========================================
@@ -501,6 +717,7 @@ elif page == "Enquiries":
         )
 
     else:
+
         st.metric(
             "Total Saved Enquiries",
             len(records)
@@ -525,6 +742,11 @@ elif page == "Enquiries":
             f"of {len(records)} enquiries"
         )
 
+        st.caption(
+            "Click an enquiry below to view details, "
+            "update its status, edit or delete it."
+        )
+
         if not filtered_records:
 
             st.markdown(
@@ -537,24 +759,35 @@ elif page == "Enquiries":
         for enquiry in filtered_records:
 
             enquiry_id = enquiry["id"]
-            name = enquiry["name"] or "Unknown name"
-            source = enquiry["source"] or "Unknown source"
-            programme = enquiry["programme"] or "Unknown"
-            status = enquiry["status"] or "New"
+
+            name = (
+                enquiry["name"] or "Unknown name"
+            )
+
+            source = (
+                enquiry["source"] or "Unknown"
+            )
+
+            programme = (
+                enquiry["programme"] or "Unknown"
+            )
+
+            status = (
+                enquiry["status"] or "New"
+            )
 
             with st.expander(
-                f"{name}  •  {source}  •  Status: {status}",
-                expanded=False
+                f"{name}  •  {source}  •  Status: {status}"
             ):
 
                 st.caption(
-                    f"Enquiry ID: {enquiry_id}  ·  "
                     f"Programme: {programme}"
                 )
 
-                col1, col2 = st.columns(2)
+                left, right = st.columns(2)
 
-                with col1:
+                with left:
+
                     st.text_input(
                         "Customer Name",
                         value=name,
@@ -576,7 +809,8 @@ elif page == "Enquiries":
                         key=f"view_source_{enquiry_id}"
                     )
 
-                with col2:
+                with right:
+
                     st.text_input(
                         "Programme",
                         value=programme,
@@ -593,7 +827,9 @@ elif page == "Enquiries":
 
                     st.text_input(
                         "Saved At (UTC)",
-                        value=str(enquiry["created_at"] or ""),
+                        value=str(
+                            enquiry["created_at"] or ""
+                        ),
                         disabled=True,
                         key=f"view_date_{enquiry_id}"
                     )
@@ -601,204 +837,310 @@ elif page == "Enquiries":
                 st.divider()
 
                 # UPDATE STATUS
-                st.markdown("**Change Enquiry Status**")
 
-                status_col, update_col = st.columns([3, 1])
+                st.markdown(
+                    "**Change Enquiry Status**"
+                )
+
+                status_col, update_col = st.columns(
+                    [3, 1]
+                )
 
                 with status_col:
+
                     selected_status = st.selectbox(
                         "Status",
                         STATUSES,
                         index=(
                             STATUSES.index(status)
-                            if status in STATUSES else 0
+                            if status in STATUSES
+                            else 0
                         ),
                         key=f"status_{enquiry_id}",
                         label_visibility="collapsed"
                     )
 
                 with update_col:
+
                     if st.button(
                         "Update Status",
-                        key=f"update_{enquiry_id}",
-                        disabled=(selected_status == status),
+                        key=f"status_btn_{enquiry_id}",
+                        disabled=(
+                            selected_status == status
+                        ),
                         use_container_width=True
                     ):
 
-                        updated = update_enquiry_status(
+                        update_enquiry_status(
                             enquiry_id,
                             selected_status
                         )
 
-                        if updated:
-                            st.rerun()
-                        else:
-                            st.error("Could not update status.")
+                        st.rerun()
 
                 st.divider()
 
-                # ACTION BUTTONS
-                view_col, edit_col, delete_col = st.columns(3)
+                # VIEW, EDIT, DELETE BUTTONS
+
+                view_col, edit_col, delete_col = (
+                    st.columns(3)
+                )
 
                 with view_col:
+
                     if st.button(
                         "View Message",
                         key=f"view_btn_{enquiry_id}",
                         use_container_width=True
                     ):
 
-                        key = f"view_open_{enquiry_id}"
-                        st.session_state[key] = not (
-                            st.session_state.get(key, False)
+                        key = (
+                            f"show_message_{enquiry_id}"
                         )
+
+                        st.session_state[key] = not (
+                            st.session_state.get(
+                                key, False
+                            )
+                        )
+
                         st.rerun()
 
                 with edit_col:
+
                     if st.button(
                         "Edit",
                         key=f"edit_btn_{enquiry_id}",
                         use_container_width=True
                     ):
 
-                        key = f"edit_open_{enquiry_id}"
+                        key = (
+                            f"edit_open_{enquiry_id}"
+                        )
+
                         st.session_state[key] = not (
-                            st.session_state.get(key, False)
+                            st.session_state.get(
+                                key, False
+                            )
                         )
 
                         if st.session_state[key]:
-                            for field in [
+
+                            for item in [
                                 "name",
                                 "phone",
-                                "source",
-                                "programme",
-                                "language"
+                                "language",
+                                "reply"
                             ]:
+
                                 st.session_state.pop(
-                                    f"edit_{enquiry_id}_{field}",
+                                    f"edit_{enquiry_id}_{item}",
+                                    None
+                                )
+
+                            for item in [
+                                "source",
+                                "programme"
+                            ]:
+
+                                st.session_state.pop(
+                                    f"edit_{enquiry_id}_{item}_choice",
+                                    None
+                                )
+
+                                st.session_state.pop(
+                                    f"edit_{enquiry_id}_{item}_custom",
                                     None
                                 )
 
                         st.rerun()
 
                 with delete_col:
+
                     if st.button(
                         "Delete",
                         key=f"delete_btn_{enquiry_id}",
                         use_container_width=True
                     ):
 
-                        key = f"delete_open_{enquiry_id}"
-                        st.session_state[key] = not (
-                            st.session_state.get(key, False)
+                        key = (
+                            f"delete_open_{enquiry_id}"
                         )
+
+                        st.session_state[key] = not (
+                            st.session_state.get(
+                                key, False
+                            )
+                        )
+
                         st.rerun()
 
-                # VIEW MESSAGE
+                # VIEW ORIGINAL MESSAGE AND REPLY
+
                 if st.session_state.get(
-                    f"view_open_{enquiry_id}", False
+                    f"show_message_{enquiry_id}",
+                    False
                 ):
 
                     st.text_area(
                         "Original Customer Message",
-                        value=enquiry["message"] or "",
+                        value=(
+                            enquiry["message"] or ""
+                        ),
                         disabled=True,
                         height=110,
                         key=f"original_{enquiry_id}"
                     )
 
                     st.text_area(
-                        "Saved AI Reply",
-                        value=enquiry["suggested_reply"] or "",
+                        "Saved Reply",
+                        value=(
+                            enquiry["suggested_reply"] or ""
+                        ),
                         disabled=True,
                         height=110,
-                        key=f"reply_{enquiry_id}"
+                        key=f"saved_reply_{enquiry_id}"
                     )
 
-                # EDIT CUSTOMER INFORMATION
+                # EDIT ENQUIRY
+
                 if st.session_state.get(
-                    f"edit_open_{enquiry_id}", False
+                    f"edit_open_{enquiry_id}",
+                    False
                 ):
 
-                    with st.form(
-                        key=f"edit_form_{enquiry_id}"
-                    ):
+                    st.markdown(
+                        "**Edit Enquiry**"
+                    )
+
+                    edit_left, edit_right = (
+                        st.columns(2)
+                    )
+
+                    with edit_left:
 
                         edited_name = st.text_input(
                             "Customer Name",
-                            value=enquiry["name"] or "",
+                            value=(
+                                enquiry["name"] or ""
+                            ),
                             key=f"edit_{enquiry_id}_name"
                         )
 
                         edited_phone = st.text_input(
                             "Phone Number",
-                            value=enquiry["phone"] or "",
+                            value=(
+                                enquiry["phone"] or ""
+                            ),
                             key=f"edit_{enquiry_id}_phone"
                         )
 
-                        edited_source = st.selectbox(
-                            "Source",
-                            SOURCES,
-                            index=(
-                                SOURCES.index(enquiry["source"])
-                                if enquiry["source"] in SOURCES
-                                else 0
-                            ),
-                            key=f"edit_{enquiry_id}_source"
+                        edited_source = choose_category(
+                            label="Source",
+                            defaults=SOURCES,
+                            records=records,
+                            field="source",
+                            current=source,
+                            key_prefix=(
+                                f"edit_{enquiry_id}_source"
+                            )
                         )
 
-                        edited_programme = st.selectbox(
-                            "Programme",
-                            PROGRAMMES,
-                            index=(
-                                PROGRAMMES.index(enquiry["programme"])
-                                if enquiry["programme"] in PROGRAMMES
-                                else 0
-                            ),
-                            key=f"edit_{enquiry_id}_programme"
+                    with edit_right:
+
+                        edited_programme = choose_category(
+                            label="Programme",
+                            defaults=PROGRAMMES,
+                            records=records,
+                            field="programme",
+                            current=programme,
+                            key_prefix=(
+                                f"edit_{enquiry_id}_programme"
+                            )
                         )
 
                         edited_language = st.text_input(
                             "Language",
-                            value=enquiry["language"] or "",
+                            value=(
+                                enquiry["language"] or ""
+                            ),
                             key=f"edit_{enquiry_id}_language"
                         )
 
-                        if st.form_submit_button(
-                            "Save Changes"
+                    edited_reply = st.text_area(
+                        "Suggested Reply",
+                        value=(
+                            enquiry["suggested_reply"] or ""
+                        ),
+                        height=110,
+                        key=f"edit_{enquiry_id}_reply"
+                    )
+
+                    if st.button(
+                        "Save Changes",
+                        key=f"save_changes_{enquiry_id}",
+                        type="primary"
+                    ):
+
+                        if (
+                            not edited_source
+                            or not edited_programme
                         ):
 
-                            updated = update_enquiry(
-                                enquiry_id,
-                                edited_name,
-                                edited_phone,
-                                edited_source,
-                                edited_programme,
-                                edited_language
+                            st.warning(
+                                "Enter a source and programme, "
+                                "or choose Unknown."
                             )
 
-                            if updated:
+                        else:
+
+                            try:
+
+                                update_enquiry(
+                                    enquiry_id,
+                                    edited_name,
+                                    edited_phone,
+                                    edited_source,
+                                    edited_programme,
+                                    edited_language,
+                                    edited_reply
+                                )
+
                                 st.session_state[
                                     f"edit_open_{enquiry_id}"
                                 ] = False
+
                                 st.rerun()
-                            else:
+
+                            except Exception:
+
+                                logging.exception(
+                                    "Update failed"
+                                )
+
                                 st.error(
-                                    "Could not update enquiry."
+                                    "Unable to update the enquiry. "
+                                    "Please try again."
                                 )
 
                 # DELETE CONFIRMATION
+
                 if st.session_state.get(
-                    f"delete_open_{enquiry_id}", False
+                    f"delete_open_{enquiry_id}",
+                    False
                 ):
 
                     st.warning(
-                        f"Delete enquiry {name}? "
-                        "This action cannot be undone."
+                        f"Delete enquiry for {name}? "
+                        "This cannot be undone."
                     )
 
-                    confirm_col, cancel_col = st.columns(2)
+                    confirm_col, cancel_col = (
+                        st.columns(2)
+                    )
 
                     with confirm_col:
+
                         if st.button(
                             "Confirm Delete",
                             key=f"confirm_{enquiry_id}",
@@ -806,20 +1148,14 @@ elif page == "Enquiries":
                             use_container_width=True
                         ):
 
-                            deleted = delete_enquiry(enquiry_id)
+                            delete_enquiry(
+                                enquiry_id
+                            )
 
-                            if deleted:
-                                st.session_state.pop(
-                                    f"delete_open_{enquiry_id}",
-                                    None
-                                )
-                                st.rerun()
-                            else:
-                                st.error(
-                                    "Enquiry not found."
-                                )
+                            st.rerun()
 
                     with cancel_col:
+
                         if st.button(
                             "Cancel",
                             key=f"cancel_{enquiry_id}",
@@ -829,6 +1165,7 @@ elif page == "Enquiries":
                             st.session_state[
                                 f"delete_open_{enquiry_id}"
                             ] = False
+
                             st.rerun()
 
 
@@ -842,7 +1179,10 @@ elif page == "Enquiry Tracker":
 
     columns = st.columns(5)
 
-    for column, status in zip(columns, STATUSES):
+    for column, status in zip(
+        columns,
+        STATUSES
+    ):
 
         status_records = [
             enquiry
@@ -851,6 +1191,7 @@ elif page == "Enquiry Tracker":
         ]
 
         with column:
+
             st.subheader(status)
 
             st.metric(
@@ -860,35 +1201,48 @@ elif page == "Enquiry Tracker":
 
             for enquiry in status_records:
 
+                name = escape(
+                    str(
+                        enquiry["name"]
+                        or "Unknown name"
+                    )
+                )
+
                 source = escape(
-                    str(enquiry["source"] or "Unknown")
+                    str(
+                        enquiry["source"]
+                        or "Unknown"
+                    )
                 )
 
                 programme = escape(
-                    str(enquiry["programme"] or "Unknown")
+                    str(
+                        enquiry["programme"]
+                        or "Unknown"
+                    )
                 )
 
-                name = escape(
-                    str(enquiry["name"] or "Unknown name")
-                )
-
-                with st.container(border=True):
+                with st.container(
+                    border=True
+                ):
 
                     st.markdown(
-                        f"<div class='tracker-name'>{name}</div>",
+                        f"<div class='tracker-name'>"
+                        f"{name}"
+                        f"</div>",
                         unsafe_allow_html=True
                     )
 
                     st.markdown(
-                        "<div class='tracker-detail'>"
+                        f"<div class='tracker-detail'>"
                         f"Source: {source}"
-                        "</div>",
+                        f"</div>",
                         unsafe_allow_html=True
                     )
 
                     st.markdown(
-                        "<div class='tracker-detail'>"
+                        f"<div class='tracker-detail'>"
                         f"Programme: {programme}"
-                        "</div>",
+                        f"</div>",
                         unsafe_allow_html=True
                     )

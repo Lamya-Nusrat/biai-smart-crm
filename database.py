@@ -3,12 +3,13 @@ import sqlite3
 from pathlib import Path
 
 
-# ------------------------------------------
+# ----------------------------------------
 # DATABASE CONFIGURATION
-# ------------------------------------------
+# ----------------------------------------
 
 DATABASE_NAME = (
-    Path(__file__).resolve().parent / "biai_crm.db"
+    Path(__file__).resolve().parent
+    / "biai_crm.db"
 )
 
 STATUSES = (
@@ -20,22 +21,24 @@ STATUSES = (
 )
 
 
-# ------------------------------------------
+# ----------------------------------------
 # DATABASE CONNECTION
-# ------------------------------------------
+# ----------------------------------------
 
 def connect():
 
-    connection = sqlite3.connect(DATABASE_NAME)
+    connection = sqlite3.connect(
+        DATABASE_NAME
+    )
 
     connection.row_factory = sqlite3.Row
 
     return connection
 
 
-# ------------------------------------------
+# ----------------------------------------
 # CREATE DATABASE
-# ------------------------------------------
+# ----------------------------------------
 
 def init_database():
 
@@ -57,9 +60,9 @@ def init_database():
         """)
 
 
-# ------------------------------------------
-# SAVE NEW ENQUIRY
-# ------------------------------------------
+# ----------------------------------------
+# SAVE ENQUIRY
+# ----------------------------------------
 
 def save_enquiry(
     name,
@@ -73,7 +76,10 @@ def save_enquiry(
 ):
 
     if status not in STATUSES:
-        raise ValueError("Invalid enquiry status.")
+
+        raise ValueError(
+            "Invalid enquiry status"
+        )
 
     with connect() as connection:
 
@@ -103,9 +109,9 @@ def save_enquiry(
         return cursor.lastrowid
 
 
-# ------------------------------------------
-# READ ALL ENQUIRIES
-# ------------------------------------------
+# ----------------------------------------
+# GET SAVED ENQUIRIES
+# ----------------------------------------
 
 def get_all_enquiries():
 
@@ -125,14 +131,20 @@ def get_all_enquiries():
         ]
 
 
-# ------------------------------------------
-# UPDATE ENQUIRY STAGE
-# ------------------------------------------
+# ----------------------------------------
+# UPDATE ENQUIRY STATUS
+# ----------------------------------------
 
-def update_enquiry_status(enquiry_id, new_status):
+def update_enquiry_status(
+    enquiry_id,
+    new_status
+):
 
     if new_status not in STATUSES:
-        raise ValueError("Invalid enquiry status.")
+
+        raise ValueError(
+            "Invalid enquiry status"
+        )
 
     with connect() as connection:
 
@@ -142,15 +154,18 @@ def update_enquiry_status(enquiry_id, new_status):
             SET status = ?
             WHERE id = ?
             """,
-            (new_status, enquiry_id)
+            (
+                new_status,
+                enquiry_id
+            )
         )
 
         return cursor.rowcount > 0
 
 
-# ------------------------------------------
-# EDIT CUSTOMER INFORMATION
-# ------------------------------------------
+# ----------------------------------------
+# EDIT CUSTOMER INFORMATION AND REPLY
+# ----------------------------------------
 
 def update_enquiry(
     enquiry_id,
@@ -158,7 +173,8 @@ def update_enquiry(
     phone,
     source,
     programme,
-    language
+    language,
+    suggested_reply
 ):
 
     with connect() as connection:
@@ -170,7 +186,8 @@ def update_enquiry(
                 phone = ?,
                 source = ?,
                 programme = ?,
-                language = ?
+                language = ?,
+                suggested_reply = ?
             WHERE id = ?
         """, (
             name,
@@ -178,17 +195,20 @@ def update_enquiry(
             source,
             programme,
             language,
+            suggested_reply,
             enquiry_id
         ))
 
         return cursor.rowcount > 0
 
 
-# ------------------------------------------
+# ----------------------------------------
 # DELETE ENQUIRY
-# ------------------------------------------
+# ----------------------------------------
 
-def delete_enquiry(enquiry_id):
+def delete_enquiry(
+    enquiry_id
+):
 
     with connect() as connection:
 
@@ -203,11 +223,14 @@ def delete_enquiry(enquiry_id):
         return cursor.rowcount > 0
 
 
-# ------------------------------------------
+# ----------------------------------------
 # DUPLICATE DETECTION
-# ------------------------------------------
+# ----------------------------------------
 
-def matching_enquiries(phone, message):
+def matching_enquiries(
+    phone,
+    message
+):
 
     with connect() as connection:
 
@@ -219,7 +242,10 @@ def matching_enquiries(phone, message):
                 FROM enquiries
                 WHERE phone = ? AND message = ?
                 """,
-                (phone, message)
+                (
+                    phone,
+                    message
+                )
             ).fetchall()
 
         else:
@@ -239,8 +265,8 @@ def matching_enquiries(phone, message):
         ]
 
 
-# ------------------------------------------
+# ----------------------------------------
 # INITIALIZE DATABASE
-# ------------------------------------------
+# ----------------------------------------
 
 init_database()
