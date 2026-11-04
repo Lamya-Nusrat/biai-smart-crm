@@ -60,6 +60,21 @@ The project uses fictional sample enquiries provided by BIAI for its Round 2 ass
 - SQLite data is stored locally; persistent storage for cloud deployment requires additional setup.
 - Automated follow-up reminders are not implemented.
 
+## Gemini Free Tier Limitations
+
+This application uses the Google Gemini API Free Tier, which has usage limits, including requests per minute and requests per day.
+
+When the quota is exceeded, AI information extraction and suggested reply generation may become temporarily unavailable. For example, the API may return a `429 RESOURCE_EXHAUSTED` error.
+
+The application displays a user-friendly error message instead of technical API details.
+
+Gemini model fallback helps with certain temporary service errors but does not guarantee uninterrupted availability.
+
+Users can check their API usage and limits through Google AI Studio:
+https://aistudio.google.com/rate-limit
+
+The application can be used within the available free quota without enabling paid billing.
+
 ## Future Improvements
 
 - Follow-up reminders
