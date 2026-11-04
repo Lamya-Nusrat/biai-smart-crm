@@ -447,7 +447,6 @@ elif page == "AI Enquiry Assistant":
 
         st.success(
             "Enquiry saved successfully! "
-            "You can paste a new enquiry."
         )
 
     message = st.text_area(
@@ -639,7 +638,7 @@ elif page == "AI Enquiry Assistant":
 
             st.warning(
                 "This enquiry may already be saved. "
-                "You can still save it again if needed."
+                "Do you want to save it again?"
             )
 
         if st.button(
