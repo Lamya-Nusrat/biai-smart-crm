@@ -254,7 +254,6 @@ def category_options(defaults, records, field, current):
     values = list(defaults)
 
     for record in records:
-
         value = str(
             record.get(field) or ""
         ).strip()
@@ -443,10 +442,18 @@ elif page == "AI Enquiry Assistant":
 
     st.title("AI Enquiry Assistant")
 
+    # Gemini Free Tier information
+    st.warning(
+        "Gemini Free Tier has daily request limits. "
+        "AI features may be temporarily unavailable "
+        "when the quota is reached. Please try again "
+        "after the limit resets."
+    )
+
     if st.session_state.pop("saved_notice", False):
 
         st.success(
-            "Enquiry saved successfully! "
+            "Enquiry saved successfully!"
         )
 
     message = st.text_area(
@@ -687,10 +694,6 @@ elif page == "AI Enquiry Assistant":
                         "Please try again."
                     )
 
-    elif (
-        result is not None
-        and message != st.session_state.processed_message
-    ):
 
 # ========================================
 # SAVED ENQUIRIES
